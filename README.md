@@ -4,6 +4,10 @@
 
 Implementation of <a href="https://arxiv.org/abs/2203.09494">Transframer</a>, Deepmind's U-net + Transformer architecture for up to 30 seconds video generation, in Pytorch
 
+## Appreciation
+
+- This work would not be possible without the generous sponsorship from <a href="https://stability.ai/">Stability AI</a>, as well as my other sponsors
+
 ## Citations
 
 ```bibtex
