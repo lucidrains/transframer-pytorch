@@ -1,3 +1,5 @@
+<img src="./transframer.png" width="400px"></img>
+
 ## Transframer - Pytorch (wip)
 
 Implementation of <a href="https://arxiv.org/abs/2203.09494">Transframer</a>, Deepmind's U-net + Transformer architecture for up to 30 seconds video generation, in Pytorch
