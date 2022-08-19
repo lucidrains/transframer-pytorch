@@ -52,7 +52,8 @@ class Attention(nn.Module):
         dim_head = 64,
         heads = 8,
         scale = 10,
-        causal = False
+        causal = False,
+        norm_context = False
     ):
         super().__init__()
         self.heads = heads
@@ -60,29 +61,46 @@ class Attention(nn.Module):
         self.causal = causal
 
         self.norm = nn.LayerNorm(dim)
+        self.norm_context = nn.LayerNorm(dim) if norm_context else nn.Identity()
 
         self.to_q = nn.Linear(dim, dim_head * heads, bias = False)
         self.to_kv = nn.Linear(dim, dim_head * 2, bias = False)
         self.to_out = nn.Linear(dim_head * heads, dim, bias = False)
 
-    def forward(self, x):
+    def forward(
+        self,
+        x,
+        context = None,
+        context_mask = None
+    ):
         h, scale, causal, device = self.heads, self.scale, self.causal, x.device
 
         x = self.norm(x)
 
-        q = self.to_q(x)
+        context = default(context, x)
+
+        q = self.to_q(normed_x)
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
 
-        k, v = self.to_kv(x).chunk(2, dim = -1)
+        if exists(context):
+            context =self.norm_context(x)
+
+        k, v = self.to_kv(context).chunk(2, dim = -1)
 
         q, k = map(l2norm, (q, k))
 
         sim = einsum('b h i d, b j d -> b h i j', q, k) * self.scale
 
+        mask_value = -torch.finfo(sim.dtype).max
+
+        if exists(context_mask):
+            context_mask = rearrange(context_mask, 'b j -> b 1 1 j')
+            sim = sim.masked_fill(context_mask, mask_value)
+
         if causal:
             i, j = sim.shape[-2:]
             causal_mask = torch.ones((i, j), dtype = torch.bool, device = device).triu(j - i + 1)
-            sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
+            sim = sim.masked_fill(causal_mask, mask_value)
 
         attn = sim.softmax(dim = -1)
 
