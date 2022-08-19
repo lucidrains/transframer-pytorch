@@ -14,6 +14,10 @@ Update: On further meditation, there is nothing new in this paper except for gen
 
 - This work would not be possible without the generous sponsorship from <a href="https://stability.ai/">Stability AI</a>, as well as my other sponsors
 
+## Todo
+
+- [ ] figure out if dct can be directly extracted from images in jpeg format
+
 ## Citations
 
 ```bibtex
