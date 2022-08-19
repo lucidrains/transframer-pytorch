@@ -8,6 +8,8 @@ The gist of the paper is the usage of a Unet as a multi-frame encoder, along wit
 
 I will deviate from the implementation in this paper, using a <a href="https://github.com/lucidrains/RQ-Transformer/blob/main/rq_transformer/hierarchical_causal_transformer.py">hierarchical autoregressive transformer</a>, and just a regular resnet block in place of the NF-net block (this design choice is just Deepmind reusing their own code, as <a href="https://arxiv.org/abs/2102.06171">NF-net</a> was developed at Deepmind by Brock et al).
 
+Update: On further meditation, there is nothing new in this paper except for generative modeling on DCT representations
+
 ## Appreciation
 
 - This work would not be possible without the generous sponsorship from <a href="https://stability.ai/">Stability AI</a>, as well as my other sponsors
