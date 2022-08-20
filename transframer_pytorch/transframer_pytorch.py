@@ -111,11 +111,13 @@ class Attention(nn.Module):
 # unet
 
 class Unet(nn.Module):
-    def __init__(self, **kwargs):
+    def __init__(self, dim, *, dim_out):
         super().__init__()
+        self.to_out = nn.Conv2d(dim, dim_out, 1)
 
     def forward(self, x):
-        return x
+        out = self.to_out(x)
+        return rearrange(out, 'b c h w -> b (h w) c')
 
 # main class
 
@@ -123,6 +125,7 @@ class Transframer(nn.Module):
     def __init__(
         self,
         *,
+        unet: Unet,
         dim,
         depth,
         max_channels,
@@ -130,11 +133,10 @@ class Transframer(nn.Module):
         max_values,
         dim_head = 32,
         heads = 8,
-        ff_mult = 4.,
-        **unet_kwargs
+        ff_mult = 4.
     ):
         super().__init__()
-        self.unet = Unet(**unet_kwargs)
+        self.unet = unet
 
         self.start_token = nn.Parameter(torch.randn(dim))
 
