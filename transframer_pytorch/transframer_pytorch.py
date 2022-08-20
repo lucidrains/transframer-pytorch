@@ -110,12 +110,86 @@ class Attention(nn.Module):
 
 # unet
 
-class Unet(nn.Module):
-    def __init__(self, dim, *, dim_out):
+class Block(nn.Module):
+    def __init__(
+        self,
+        dim,
+        dim_out,
+        groups = 8
+    ):
         super().__init__()
-        self.to_out = nn.Conv2d(dim, dim_out, 1)
+        self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1)
+        self.norm = nn.GroupNorm(groups, dim_out)
+        self.act = nn.SiLU()
 
     def forward(self, x):
+        x = self.proj(x)
+        x = self.norm(x)
+        return self.act(x)
+
+class ResnetBlock(nn.Module):
+    def __init__(
+        self,
+        dim,
+        dim_out,
+        groups = 8
+    ):
+        super().__init__()
+        self.block1 = Block(dim, dim_out, groups = groups)
+        self.block2 = Block(dim_out, dim_out, groups = groups)
+        self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+
+    def forward(self, x):
+        h = self.block1(x)
+        h = self.block2(h)
+        return h + self.res_conv(x)
+
+class Unet(nn.Module):
+    def __init__(
+        self,
+        dim,
+        *,
+        dim_mults = (1, 2, 3, 4),
+        dim_out
+    ):
+        super().__init__()
+        self.to_out = nn.Conv2d(dim, dim_out, 1)
+        dims = [dim, *map(lambda t: t * dim, dim_mults)]
+        dim_pairs = tuple(zip(dims[:-1], dims[1:]))
+        mid_dim = dims[-1]
+
+        self.downs = nn.ModuleList([])
+        self.ups = nn.ModuleList([])
+
+        self.mid = ResnetBlock(mid_dim, mid_dim)
+
+        for dim_in, dim_out in dim_pairs:
+            self.downs.append(nn.ModuleList([
+                ResnetBlock(dim_in, dim_in),
+                nn.Conv2d(dim_in, dim_out, 3, 2, 1)
+            ]))
+
+            self.ups.insert(0, nn.ModuleList([
+                ResnetBlock(dim_out * 2, dim_out),
+                nn.ConvTranspose2d(dim_out, dim_in, 4, 2, 1)
+            ]))
+
+    def forward(self, x):
+
+        hiddens = []
+
+        for block, downsample in self.downs:
+            x = block(x)
+            x = downsample(x)
+            hiddens.append(x)
+
+        x = self.mid(x)
+
+        for block, upsample in self.ups:
+            x = torch.cat((x, hiddens.pop()), dim = 1)
+            x = block(x)
+            x = upsample(x)
+
         out = self.to_out(x)
         return rearrange(out, 'b c h w -> b (h w) c')
 
