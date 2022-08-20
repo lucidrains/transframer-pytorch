@@ -108,6 +108,15 @@ class Attention(nn.Module):
         out = rearrange(out, 'b h n d -> b n (h d)')
         return self.to_out(out)
 
+# unet
+
+class Unet(nn.Module):
+    def __init__(self, **kwargs):
+        super().__init__()
+
+    def forward(self, x):
+        return x
+
 # main class
 
 class Transframer(nn.Module):
@@ -121,9 +130,12 @@ class Transframer(nn.Module):
         max_values,
         dim_head = 32,
         heads = 8,
-        ff_mult = 4.
+        ff_mult = 4.,
+        **unet_kwargs
     ):
         super().__init__()
+        self.unet = Unet(**unet_kwargs)
+
         self.start_token = nn.Parameter(torch.randn(dim))
 
         self.channels = nn.Embedding(max_channels, dim)
@@ -136,12 +148,24 @@ class Transframer(nn.Module):
 
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Attention(dim, dim_head = dim_head, heads = heads),
+                Attention(dim, dim_head = dim_head, heads = heads, causal = True),
                 Attention(dim, dim_head = dim_head, heads = heads, norm_context = True),
                 FeedForward(dim, mult = ff_mult)
             ]))
 
         self.final_norm = nn.LayerNorm(dim)
+
+        # give channels and positions separate embedding for final prediction
+
+        self.axial_channels = nn.Embedding(max_channels, dim)
+        self.axial_positions = nn.Embedding(max_positions, dim)
+
+        self.axial_attn = Attention(dim, dim_head = dim_head,  heads = heads, causal = True)
+        self.axial_ff = FeedForward(dim, mult = ff_mult)
+
+        self.axial_final_norm = nn.LayerNorm(dim)
+
+        # projection to logits
 
         self.to_channel_logits = nn.Linear(dim, max_channels)
         self.to_position_logits = nn.Linear(dim, max_positions)
@@ -150,10 +174,12 @@ class Transframer(nn.Module):
     def forward(
         self,
         x,
-        encoded,
+        context_frames,
         return_loss = False
     ):
         assert x.shape[-1] == 3
+
+        encoded = self.unet(context_frames)
 
         batch = x.shape[0]
 
@@ -180,13 +206,33 @@ class Transframer(nn.Module):
             embed = cross_attn(embed, encoded) + embed
             embed = ff(embed) + embed
 
-        # to logits
-
         embed = self.final_norm(embed)
 
-        channel_logits = self.to_channel_logits(embed)
-        position_logits = self.to_position_logits(embed)
-        value_logits = self.to_value_logits(embed)
+        # now do axial attention from the summed previous embedding of channel + position + value -> next channel -> next position
+        # this was successfully done in the residual quantization transformer (RQ-Transformer) https://arxiv.org/abs/2203.01941
+        # one layer of attention should be enough, as in the Deepmind paper, they use a pretty weak baseline and it still worked well
+
+        axial_channels_emb = self.axial_channels(channels)
+        axial_positions_emb = self.axial_positions(positions)
+
+        embed = torch.stack((embed, axial_channels_emb, axial_positions_emb), dim = -2)
+
+        embed = rearrange(embed, 'b m n d -> (b m) n d')
+
+        embed = self.axial_attn(embed) + embed
+        embed = self.axial_ff(embed) + embed
+
+        embed = self.axial_final_norm(embed)
+
+        embed = rearrange(embed, '(b m) n d -> b m n d', b = batch)
+
+        pred_channel_embed, pred_position_embed, pred_value_embed = embed.unbind(dim = -2)
+
+        # to logits
+
+        channel_logits = self.to_channel_logits(pred_channel_embed)
+        position_logits = self.to_position_logits(pred_position_embed)
+        value_logits = self.to_value_logits(pred_value_embed)
 
         if not return_loss:
             return channel_logits, position_logits, value_logits
