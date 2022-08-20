@@ -27,9 +27,8 @@ def dct_to_images(images):
 # feedforward
 
 def FeedForward(
-    self,
-    *,
     dim,
+    *,
     mult = 4.
 ):
     inner_dim = int(dim * mult)
@@ -47,8 +46,8 @@ def FeedForward(
 class Attention(nn.Module):
     def __init__(
         self,
-        *,
         dim,
+        *,
         dim_head = 64,
         heads = 8,
         scale = 10,
@@ -79,11 +78,11 @@ class Attention(nn.Module):
 
         context = default(context, x)
 
-        q = self.to_q(normed_x)
+        q = self.to_q(x)
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
 
         if exists(context):
-            context =self.norm_context(x)
+            context =self.norm_context(context)
 
         k, v = self.to_kv(context).chunk(2, dim = -1)
 
@@ -116,9 +115,13 @@ class Transframer(nn.Module):
         self,
         *,
         dim,
+        depth,
         max_channels,
         max_positions,
-        max_values
+        max_values,
+        dim_head = 32,
+        heads = 8,
+        ff_mult = 4.
     ):
         super().__init__()
         self.channels = nn.Embedding(max_channels, dim)
@@ -127,11 +130,22 @@ class Transframer(nn.Module):
 
         self.postemb_norm = nn.LayerNorm(dim) # done in Bloom and YaLM for stability
 
+        self.layers = nn.ModuleList([])
+
+        for _ in range(depth):
+            self.layers.append(nn.ModuleList([
+                Attention(dim, dim_head = dim_head, heads = heads),
+                Attention(dim, dim_head = dim_head, heads = heads, norm_context = True),
+                FeedForward(dim, mult = ff_mult)
+            ]))
+
+        self.final_norm = nn.LayerNorm(dim)
+
         self.to_channel_logits = nn.Linear(dim, max_channels)
         self.to_position_logits = nn.Linear(dim, max_positions)
         self.to_value_logits = nn.Linear(dim, max_values)
 
-    def forward(self, x):
+    def forward(self, x, encoded):
         assert x.shape[-1] == 3
 
         channels, positions, values = x.unbind(dim = -1)
@@ -145,6 +159,15 @@ class Transframer(nn.Module):
         embed = self.postemb_norm(embed)
 
         # layers of attention + cross attention
+
+        for attn, cross_attn, ff in self.layers:
+            embed = attn(embed) + embed
+            embed = cross_attn(embed, encoded) + embed
+            embed = ff(embed) + embed
+
+        # to logits
+
+        embed = self.final_norm(embed)
 
         channel_logits = self.to_channel_logits(embed)
         position_logits = self.to_position_logits(embed)
