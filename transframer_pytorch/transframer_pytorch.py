@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
-from einops import rearrange
+from einops import rearrange, repeat
 
 # helpers
 
@@ -124,6 +124,8 @@ class Transframer(nn.Module):
         ff_mult = 4.
     ):
         super().__init__()
+        self.start_token = nn.Parameter(torch.randn(dim))
+
         self.channels = nn.Embedding(max_channels, dim)
         self.positions = nn.Embedding(max_positions, dim)
         self.values = nn.Embedding(max_values, dim)
@@ -148,6 +150,8 @@ class Transframer(nn.Module):
     def forward(self, x, encoded):
         assert x.shape[-1] == 3
 
+        batch = x.shape[0]
+
         channels, positions, values = x.unbind(dim = -1)
 
         channel_emb = self.channels(channels)
@@ -155,6 +159,9 @@ class Transframer(nn.Module):
         value_emb = self.values(values)
 
         embed = channel_emb + position_emb + value_emb
+
+        start_token = repeat(self.start_token, 'd -> b 1 d', b = batch)
+        embed = torch.cat((start_token, embed), dim = 1)
 
         embed = self.postemb_norm(embed)
 
