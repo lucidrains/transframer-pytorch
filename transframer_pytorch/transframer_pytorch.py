@@ -147,7 +147,12 @@ class Transframer(nn.Module):
         self.to_position_logits = nn.Linear(dim, max_positions)
         self.to_value_logits = nn.Linear(dim, max_values)
 
-    def forward(self, x, encoded):
+    def forward(
+        self,
+        x,
+        encoded,
+        return_loss = False
+    ):
         assert x.shape[-1] == 3
 
         batch = x.shape[0]
@@ -162,6 +167,9 @@ class Transframer(nn.Module):
 
         start_token = repeat(self.start_token, 'd -> b 1 d', b = batch)
         embed = torch.cat((start_token, embed), dim = 1)
+
+        if return_loss:
+            embed = embed[:, :-1]
 
         embed = self.postemb_norm(embed)
 
@@ -180,4 +188,13 @@ class Transframer(nn.Module):
         position_logits = self.to_position_logits(embed)
         value_logits = self.to_value_logits(embed)
 
-        return channel_logits
+        if not return_loss:
+            return channel_logits, position_logits, value_logits
+
+        channel_logits, position_logits, value_logits = map(lambda t: rearrange(t, 'b n c -> b c n'), (channel_logits, position_logits, value_logits))
+
+        channel_loss = F.cross_entropy(channel_logits, channels)
+        position_loss = F.cross_entropy(channel_logits, channels)
+        value_loss = F.cross_entropy(channel_logits, channels)
+
+        return (channel_loss + position_loss + value_loss) / 3
