@@ -1,3 +1,4 @@
+from functools import partial
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
@@ -207,7 +208,8 @@ class Transframer(nn.Module):
         max_values,
         dim_head = 32,
         heads = 8,
-        ff_mult = 4.
+        ff_mult = 4.,
+        ignore_index = -100
     ):
         super().__init__()
         self.unet = unet
@@ -246,6 +248,8 @@ class Transframer(nn.Module):
         self.to_channel_logits = nn.Linear(dim, max_channels)
         self.to_position_logits = nn.Linear(dim, max_positions)
         self.to_value_logits = nn.Linear(dim, max_values)
+
+        self.ignore_index = ignore_index
 
     def forward(
         self,
@@ -315,8 +319,10 @@ class Transframer(nn.Module):
 
         channel_logits, position_logits, value_logits = map(lambda t: rearrange(t, 'b n c -> b c n'), (channel_logits, position_logits, value_logits))
 
-        channel_loss = F.cross_entropy(channel_logits, channels)
-        position_loss = F.cross_entropy(channel_logits, channels)
-        value_loss = F.cross_entropy(channel_logits, channels)
+        ce = partial(F.cross_entropy, ignore_index = self.ignore_index)
+
+        channel_loss = ce(channel_logits, channels)
+        position_loss = ce(position_logits, positions)
+        value_loss = ce(value_logits, values)
 
         return (channel_loss + position_loss + value_loss) / 3
