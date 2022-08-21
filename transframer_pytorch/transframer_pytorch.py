@@ -145,13 +145,36 @@ class ResnetBlock(nn.Module):
         h = self.block2(h)
         return h + self.res_conv(x)
 
+class UnetTransformerBlock(nn.Module):
+    def __init__(
+        self,
+        dim,
+        *,
+        dim_head = 32,
+        heads = 8
+    ):
+        super().__init__()
+        self.attn = Attention(dim = dim, dim_head = dim_head, heads = heads)
+        self.ff = FeedForward(dim = dim)
+
+    def forward(self, x):
+        orig_shape = x.shape
+        x = rearrange(x, 'b c ... -> b (...) c')
+
+        x = self.attn(x) + x
+        x = self.ff(x) + x
+
+        x = rearrange(x, 'b n c -> b c n')
+        return x.reshape(*orig_shape)
+
 class Unet(nn.Module):
     def __init__(
         self,
         dim,
         *,
         dim_mults = (1, 2, 3, 4),
-        dim_out
+        dim_out,
+        **attn_kwargs
     ):
         super().__init__()
         self.to_out = nn.Conv2d(dim, dim_out, 1)
@@ -167,11 +190,13 @@ class Unet(nn.Module):
         for dim_in, dim_out in dim_pairs:
             self.downs.append(nn.ModuleList([
                 ResnetBlock(dim_in, dim_in),
+                UnetTransformerBlock(dim_in, **attn_kwargs),
                 nn.Conv2d(dim_in, dim_out, 3, 2, 1)
             ]))
 
             self.ups.insert(0, nn.ModuleList([
                 ResnetBlock(dim_out * 2, dim_out),
+                UnetTransformerBlock(dim_out, **attn_kwargs),
                 nn.ConvTranspose2d(dim_out, dim_in, 4, 2, 1)
             ]))
 
@@ -179,16 +204,18 @@ class Unet(nn.Module):
 
         hiddens = []
 
-        for block, downsample in self.downs:
+        for block, attn_block, downsample in self.downs:
             x = block(x)
+            x = attn_block(x)
             x = downsample(x)
             hiddens.append(x)
 
         x = self.mid(x)
 
-        for block, upsample in self.ups:
+        for block, attn_block, upsample in self.ups:
             x = torch.cat((x, hiddens.pop()), dim = 1)
             x = block(x)
+            x = attn_block(x)
             x = upsample(x)
 
         out = self.to_out(x)
