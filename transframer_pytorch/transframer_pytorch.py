@@ -8,7 +8,7 @@ from torch import nn, einsum
 
 from einops import rearrange, repeat
 
-from kornia.color.ycbcr import rgb_to_ycbcr
+from kornia.color.ycbcr import rgb_to_ycbcr, ycbcr_to_rgb
 
 # helpers
 
@@ -87,9 +87,9 @@ def dct_2d(x, norm = None):
     x2 = dct_(rearrange(x1, '... h w -> ...  w h'))
     return rearrange(x2, '... h w -> ... w h')
 
-def idct_2d(X, norm = None):
+def idct_2d(x, norm = None):
     idct_ = partial(idct, norm = norm)
-    x1 = idct_(X)
+    x1 = idct_(x)
     x2 = idct_(rearrange(x1, '... h w -> ... w h'))
     return rearrange(x2, '... h w -> ... w h')
 
@@ -317,6 +317,8 @@ class Transframer(nn.Module):
         max_channels,
         max_positions,
         max_values,
+        image_size,
+        block_size = 8,
         dim_head = 32,
         heads = 8,
         ff_mult = 4.,
@@ -326,6 +328,9 @@ class Transframer(nn.Module):
         self.unet = unet
 
         self.start_token = nn.Parameter(torch.randn(dim))
+
+        num_blocks = (image_size // block_size) ** 2
+        self.block_pos_emb = nn.Parameter(torch.randn(num_blocks, dim))
 
         self.channels = nn.Embedding(max_channels, dim)
         self.positions = nn.Embedding(max_positions, dim)
