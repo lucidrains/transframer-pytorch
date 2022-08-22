@@ -1,8 +1,14 @@
+from math import sqrt, pi
 from functools import partial
+
 import torch
 import torch.nn.functional as F
+from torch.fft import fft, irfft
 from torch import nn, einsum
+
 from einops import rearrange, repeat
+
+from kornia.color.ycbcr import rgb_to_ycbcr
 
 # helpers
 
@@ -18,6 +24,84 @@ def l2norm(t):
     return F.normalize(t, dim = -1)
 
 # dct related encoding / decoding functions
+
+# functions are adapted from https://github.com/zh217/torch-dct/blob/master/torch_dct/_dct.py
+# but fixes for most torch versions > 1.9, using latest fft and irfft
+
+def dct(x, norm = None):
+    shape, dtype, device = x.shape, x.dtype, x.device
+    N = shape[-1]
+
+    x = rearrange(x.contiguous(), '... n -> (...) n')
+
+    v = torch.cat([x[:, ::2], x[:, 1::2].flip((1,))], dim = 1)
+
+    vc = torch.view_as_real(fft(v, dim=1))
+
+    k = -torch.arange(N, dtype = dtype, device = device) * pi / (2 * N)
+    k = rearrange(k, 'n -> 1 n')
+
+    v = vc[:, :, 0] * k.cos() - vc[:, :, 1] * k.sin()
+
+    if norm == 'ortho':
+        v[:, 0] /= sqrt(N) * 2
+        v[:, 1:] /= sqrt(N / 2) * 2
+
+    v *= 2
+    return v.view(*shape)
+
+
+def idct(x, norm = None):
+    shape, dtype, device = x.shape, x.dtype, x.device
+    N = shape[-1]
+
+    x_v = rearrange(x.contiguous(), '... n -> (...) n') / 2
+
+    if norm == 'ortho':
+        x_v[:, 0] *= sqrt(N) * 2
+        x_v[:, 1:] *= sqrt(N / 2) * 2
+
+    k = torch.arange(N, dtype = dtype, device = device) * pi / (2 * N)
+    k = rearrange(k, 'n -> 1 n')
+    w_r = torch.cos(k)
+    w_i = torch.sin(k)
+
+    v_t_r = x_v
+    v_t_i = torch.cat([x_v[:, :1] * 0, -x_v.flip((1,))[:, :-1]], dim = 1)
+
+    v_r = v_t_r * w_r - v_t_i * w_i
+    v_i = v_t_r * w_i + v_t_i * w_r
+
+    v = torch.stack((v_r, v_i), dim = -1)
+
+    v = irfft(torch.view_as_complex(v), n = N, dim = 1)
+    x = torch.zeros_like(v)
+    x[:, ::2] += v[:, :N - (N // 2)]
+    x[:, 1::2] += v.flip((1,))[:, :N // 2]
+
+    return x.view(*shape)
+
+def dct_2d(x, norm = None):
+    dct_ = partial(dct, norm = norm)
+    x1 = dct_(x)
+    x2 = dct_(rearrange(x1, '... h w -> ...  w h'))
+    return rearrange(x2, '... h w -> ... w h')
+
+def idct_2d(X, norm = None):
+    idct_ = partial(idct, norm = norm)
+    x1 = idct_(X)
+    x2 = idct_(rearrange(x1, '... h w -> ... w h'))
+    return rearrange(x2, '... h w -> ... w h')
+
+def blockify(x, block_size = 8):
+    assert block_size in {8, 16}
+    return rearrange(x, 'b c (h bs1) (w bs2) -> (b h w) c bs1 bs2', bs1 = block_size, bs2 = block_size)
+
+def deblockify(x, h, w, block_size = 8):
+    assert block_size in {8, 16}
+    return rearrange('(b h w) c bs bs -> b c (h bs) (w bs)', h = h, w = w)
+
+# final functions from rgb -> dct and back
 
 def images_to_dct(images):
     raise NotImplementedError
