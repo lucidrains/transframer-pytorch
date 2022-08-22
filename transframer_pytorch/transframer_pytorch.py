@@ -99,7 +99,7 @@ def blockify(x, block_size = 8):
 
 def deblockify(x, h, w, block_size = 8):
     assert block_size in {8, 16}
-    return rearrange('(b h w) c bs bs -> b c (h bs) (w bs)', h = h, w = w)
+    return rearrange(x, '(b h w) c bs1 bs2 -> b c (h bs1) (w bs2)', h = h, w = w)
 
 # final functions from rgb -> dct and back
 
