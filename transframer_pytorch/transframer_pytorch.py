@@ -329,8 +329,7 @@ class Transframer(nn.Module):
 
         self.start_token = nn.Parameter(torch.randn(dim))
 
-        num_blocks = (image_size // block_size) ** 2
-        self.block_pos_emb = nn.Parameter(torch.randn(num_blocks, dim))
+        self.block_pos_emb = nn.Parameter(torch.randn(2, (image_size // block_size), dim))
 
         self.channels = nn.Embedding(max_channels, dim)
         self.positions = nn.Embedding(max_positions, dim)
@@ -366,6 +365,11 @@ class Transframer(nn.Module):
         self.to_value_logits = nn.Linear(dim, max_values)
 
         self.ignore_index = ignore_index
+
+    def get_block_pos_emb(self):
+        block_pos_emb_h, block_pos_emb_w = self.block_pos_emb.unbind(dim = 0)
+        block_pos_emb = rearrange(block_pos_emb_h, 'h d -> h 1 d') + rearrange(block_pos_emb_w, 'w d -> 1 w d')
+        return rearrange(block_pos_emb, '... d -> (...) d')
 
     def forward(
         self,
